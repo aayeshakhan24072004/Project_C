@@ -1,0 +1,54 @@
+name: banksphere
+version: "1.0.0"
+config-version: 2
+
+profile: banksphere
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+docs-paths: ["docs"]
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  analysis_start_date: "2020-01-01"
+  high_value_transaction_threshold: 100000
+  transaction_incremental_lookback_days: 3
+
+on-run-start:
+  - "{{ log_run_event('run_started') }}"
+on-run-end:
+  - "{{ log_run_event('run_finished') }}"
+
+seeds:
+  banksphere:
+    +schema: seed
+    +quote_columns: false
+    banking_reference_codes:
+      +column_types:
+        product_code: string
+        product_group: string
+        description: string
+
+models:
+  banksphere:
+    staging:
+      +schema: staging
+      +materialized: view
+    intermediate:
+      +schema: core
+    dimensions:
+      +schema: core
+      +materialized: table
+    facts:
+      +schema: core
+    marts:
+      +schema: marts
+      +materialized: table
+
+snapshots:
+  banksphere:
+    +target_schema: "{{ target.schema }}_snapshots"

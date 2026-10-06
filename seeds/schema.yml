@@ -1,0 +1,13 @@
+version: 2
+
+seeds:
+  - name: banking_reference_codes
+    description: Small, stable product-code lookup seeded into each environment and referenced by staging models.
+    columns:
+      - name: product_code
+        description: Product key matched to account_type.
+        tests: [not_null, unique]
+      - name: product_group
+        description: Reporting group for the product.
+      - name: description
+        description: Human-readable product definition.

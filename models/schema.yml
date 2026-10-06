@@ -1,0 +1,233 @@
+version: 2
+
+models:
+  - name: stg_branches
+    description: Typed and normalized branch master; one row per branch.
+    columns:
+      - name: branch_id
+        description: Stable branch business key.
+        tests: [not_null, unique]
+      - name: opened_date
+        description: Calendar date the branch opened.
+  - name: stg_customers
+    description: Typed customer master; one row per customer.
+    columns:
+      - name: customer_id
+        description: Stable customer business key.
+        tests: [not_null, unique]
+      - name: customer_segment
+        description: Current commercial segment.
+      - name: source_updated_at
+        description: Source update timestamp retained for freshness and history.
+  - name: stg_accounts
+    description: Normalized account master enriched with the small product reference seed.
+    columns:
+      - name: account_id
+        description: Stable account business key.
+        tests: [not_null, unique]
+      - name: customer_id
+        description: Owning customer business key.
+        tests:
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_id
+      - name: branch_id
+        description: Servicing branch business key.
+        tests:
+          - relationships:
+              to: ref('dim_branch')
+              field: branch_id
+      - name: account_status
+        description: Current lifecycle status of the account.
+        tests:
+          - accepted_values:
+              values: ['ACTIVE', 'BLOCKED', 'CLOSED', 'DORMANT']
+              config:
+                severity: warn
+      - name: current_balance
+        description: Latest reported account balance in the account currency.
+  - name: stg_transactions
+    description: Normalized transaction source; one row per transaction event.
+    columns:
+      - name: transaction_id
+        description: Stable transaction business key.
+        tests: [not_null, unique]
+      - name: transaction_status
+        description: Processing outcome; only the declared banking states are valid.
+        tests:
+          - accepted_values:
+              values: ['SUCCESS', 'FAILED', 'PENDING', 'REVERSED']
+      - name: transaction_classification
+        description: Reusable business grouping derived from the source transaction type.
+      - name: amount
+        description: Transaction amount in the recorded currency.
+        tests:
+          - non_negative_success_amount:
+              status_column: transaction_status
+  - name: stg_cards
+    description: Normalized debit and credit card records; one row per card.
+    columns:
+      - name: card_id
+        description: Stable card business key.
+        tests: [not_null, unique]
+      - name: account_id
+        description: Linked account business key.
+        tests:
+          - relationships:
+              to: ref('dim_account')
+              field: account_id
+      - name: customer_id
+        description: Linked customer business key.
+        tests:
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_id
+      - name: card_status
+        description: Current lifecycle state of the card.
+        tests:
+          - accepted_values:
+              values: ['ACTIVE', 'BLOCKED', 'CLOSED', 'EXPIRED']
+  - name: stg_loans
+    description: Normalized loan portfolio source; one row per loan.
+    columns:
+      - name: loan_id
+        description: Stable loan business key.
+        tests: [not_null, unique]
+      - name: customer_id
+        description: Borrower customer business key.
+        tests:
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_id
+      - name: account_id
+        description: Linked account business key.
+        tests:
+          - relationships:
+              to: ref('dim_account')
+              field: account_id
+      - name: loan_status
+        description: Current lifecycle status of the loan.
+        tests:
+          - accepted_values:
+              values: ['ACTIVE', 'CLOSED', 'DEFAULTED', 'PENDING']
+  - name: stg_loan_payments
+    description: Normalized loan repayments; one row per payment event.
+    columns:
+      - name: payment_id
+        description: Stable repayment business key.
+        tests: [not_null, unique]
+      - name: loan_id
+        description: Related loan business key.
+        tests:
+          - relationships:
+              to: ref('dim_loan')
+              field: loan_id
+      - name: payment_status
+        description: Repayment processing result.
+        tests:
+          - accepted_values:
+              values: ['SUCCESS', 'FAILED', 'LATE']
+  - name: int_account_transactions
+    description: "Ephemeral transaction backbone enriched with account and branch keys. Grain: one source transaction."
+  - name: int_customer_activity
+    description: "Customer-level successful activity aggregation across transaction history. Grain: one row per customer with activity."
+  - name: int_loan_summary
+    description: "Loan-level repayment summary. Grain: one row per loan."
+  - name: dim_customer
+    description: Current-state customer dimension; historical changes are retained by the customer snapshot.
+    columns:
+      - name: customer_id
+        description: Customer dimension business key.
+        tests: [not_null, unique]
+      - name: customer_segment
+        description: Current customer segment.
+  - name: dim_account
+    description: Current-state account dimension with product reference attributes.
+    columns:
+      - name: account_id
+        description: Account dimension business key.
+        tests: [not_null, unique]
+  - name: dim_branch
+    description: Branch dimension used for geographic and network reporting.
+    columns:
+      - name: branch_id
+        description: Branch dimension business key.
+        tests: [not_null, unique]
+  - name: dim_card
+    description: Current card dimension; one row per issued card.
+    columns:
+      - name: card_id
+        description: Card dimension business key.
+        tests: [not_null, unique]
+  - name: dim_loan
+    description: Current loan dimension; one row per loan contract.
+    columns:
+      - name: loan_id
+        description: Loan dimension business key.
+        tests: [not_null, unique]
+      - name: outstanding_amount
+        description: Source-reported current amount outstanding.
+  - name: dim_date
+    description: Continuous Gregorian calendar dimension beginning at the configured analysis start date.
+    columns:
+      - name: date_id
+        description: Integer date key in YYYYMMDD format.
+        tests: [not_null, unique]
+      - name: date_day
+        description: Calendar date.
+        tests: [not_null, unique]
+  - name: fact_transactions
+    description: "Transaction fact. Grain: one row per transaction_id. Incremental merge uses a source-update lookback; partitioned by transaction_date and clustered by account, customer, and type."
+    columns:
+      - name: transaction_id
+        description: Transaction fact primary key.
+        tests: [not_null, unique]
+      - name: account_id
+        description: Account foreign key.
+        tests:
+          - relationships:
+              to: ref('dim_account')
+              field: account_id
+      - name: customer_id
+        description: Customer foreign key from the transaction source.
+        tests:
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_id
+      - name: branch_id
+        description: Branch where the related account is serviced.
+        tests:
+          - relationships:
+              to: ref('dim_branch')
+              field: branch_id
+      - name: transaction_date
+        description: Business date and BigQuery partition column.
+      - name: amount
+        description: Transaction amount in the recorded currency.
+        tests:
+         - non_negative_success_amount:
+             status_column: transaction_status
+  - name: fact_loan_payments
+    description: "Loan repayment fact. Grain: one row per payment_id."
+    columns:
+      - name: payment_id
+        description: Payment fact primary key.
+        tests: [not_null, unique]
+      - name: loan_id
+        description: Loan foreign key.
+        tests:
+          - relationships:
+              to: ref('dim_loan')
+              field: loan_id
+  - name: mart_customer_360
+    description: "Customer 360 view of balances, products, activity, recency, and loan exposure. Grain: one row per customer."
+  - name: mart_daily_transactions
+    description: Daily transaction value and volume by channel and transaction type.
+  - name: mart_branch_performance
+    description: Branch transaction throughput and active loan exposure.
+  - name: mart_loan_portfolio
+    description: Loan counts, balances, and payment outcomes by loan type and status.
+  - name: mart_customer_profitability
+    description: Observed fee and interest amounts from successful transaction/payment records; a proxy, not full customer profitability.
+  - name: mart_monthly_transaction_mv
+    description: BigQuery materialized-view example for monthly successful transaction value by transaction type.
